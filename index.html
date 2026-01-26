@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AetherDraw v2 | Ultimate Spatial Canvas</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"
+        crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"
+        crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --primary: #00f2ff;
+            --secondary: #bd00ff;
+            --accent: #ff0055;
+            --bg: #0f172a;
+            --surface: rgba(15, 23, 42, 0.85);
+            --text: #f8fafc;
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: 'Outfit', sans-serif;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* Container for layer stacking */
+        .viewport {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: black;
+        }
+
+        /* 1. Underlying Video Feed (flipped for mirror effect) */
+        #input_video {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            z-index: 1;
+            opacity: 0.4;
+            filter: contrast(1.2) saturation(0.8);
+        }
+
+        /* 2. Drawing Canvas */
+        #output_canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            filter: drop-shadow(0 0 10px rgba(0, 242, 255, 0.3));
+            /* Global glow for neon feel */
+        }
+
+        /* 3. Particle Effects Canvas */
+        #particle_canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            z-index: 3;
+            pointer-events: none;
+        }
+
+        /* 4. Hand Skeleton Overlay Canvas */
+        #overlay_canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            z-index: 4;
+            pointer-events: none;
+        }
+
+        /* 5. UI Layer */
+        .ui-layer {
+            position: absolute;
+            z-index: 10;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 1.5rem;
+        }
+
+        .ui-interactive {
+            pointer-events: auto;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--surface);
+            backdrop-filter: blur(20px);
+            padding: 1rem 2rem;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            max-width: 800px;
+            margin: 0 auto;
+            flex-wrap: wrap;
+            /* Fix: Allow wrapping on small screens */
+            gap: 1rem;
+        }
+
+        .logo {
+            font-weight: 800;
+            font-size: 1.8rem;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -1px;
+            position: relative;
+        }
+
+        .logo::after {
+            content: "v2.0";
+            position: absolute;
+            top: -5px;
+            right: -30px;
+            font-size: 0.8rem;
+            background: var(--accent);
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: white;
+            -webkit-text-fill-color: white;
+        }
+
+        .status-container {
+            display: flex;
+            gap: 1.5rem;
+            align-items: center;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 0.4rem 0.8rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            cursor: pointer;
+            /* Interactive */
+        }
+
+        .status-badge:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .mic-icon {
+            font-size: 1rem;
+        }
+
+        .mic-active .mic-icon {
+            animation: pulse-mic 2s infinite;
+            color: var(--primary);
+        }
+
+        .mic-inactive .mic-icon {
+            color: #64748b;
+        }
+
+        /* Tools Bar */
+        .toolbar {
+            position: absolute;
+            left: 2rem;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            flex-direction: column;
+            gap: 1.2rem;
+            background: var(--surface);
+            backdrop-filter: blur(20px);
+            padding: 1.2rem;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            max-height: 80vh;
+            /* Fix: Prevent overflow */
+            overflow-y: auto;
+            /* Fix: Scroll if too tall */
+            scrollbar-width: none;
+            /* Hide scrollbar */
+        }
+
+        .tool-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.8rem;
+            align-items: center;
+        }
+
+        .tool-label {
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #64748b;
+            margin-bottom: 0.2rem;
+        }
+
+        .tool-btn {
+            width: 54px;
+            height: 54px;
+            border-radius: 14px;
+            border: none;
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text);
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.4rem;
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .tool-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            transform: scale(1.1) rotate(5deg);
+        }
+
+        .tool-btn.active {
+            background: var(--primary);
+            color: #000;
+            box-shadow: 0 0 20px rgba(0, 242, 255, 0.5);
+            transform: scale(1.1);
+        }
+
+        .tool-btn.active::after {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            right: -2px;
+            bottom: -2px;
+            border: 2px solid white;
+            border-radius: 16px;
+        }
+
+        /* Color Palette */
+        .palette {
+            display: flex;
+            flex-direction: column;
+            gap: 0.8rem;
+            margin-top: 0.5rem;
+        }
+
+        .color-swatch {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            transition: transform 0.2s;
+            flex-shrink: 0;
+        }
+
+        .color-swatch:hover {
+            transform: scale(1.2);
+        }
+
+        .color-swatch.selected {
+            border-color: white;
+            transform: scale(1.2);
+            box-shadow: 0 0 10px currentColor;
+        }
+
+        /* Voice Feedback Toast */
+        .voice-toast {
+            position: fixed;
+            /* Fixed relative to screen */
+            top: 15%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.9);
+            color: black;
+            padding: 0.8rem 2rem;
+            border-radius: 50px;
+            font-weight: 600;
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            pointer-events: none;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            z-index: 200;
+        }
+
+        .voice-toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(10px);
+        }
+
+        /* Help Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            z-index: 3000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+
+        .modal-overlay.open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-content {
+            background: #1e293b;
+            padding: 2rem;
+            border-radius: 20px;
+            max-width: 600px;
+            width: 90%;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+        }
+
+        .modal-title {
+            margin-top: 0;
+            color: var(--primary);
+        }
+
+        .close-btn {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+
+        .command-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .cmd-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 1rem;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .cmd-key {
+            color: var(--accent);
+            font-weight: bold;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+        }
+
+        /* Cursors */
+        .cursor-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        .hand-cursor {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            transition: width 0.1s, height 0.1s;
+        }
+
+        .cursor-ring {
+            width: 40px;
+            height: 40px;
+            border: 2px solid white;
+            border-radius: 50%;
+            transition: all 0.1s;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+        }
+
+        .cursor-ring.pinched {
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-width: 0;
+        }
+
+        .cursor-label {
+            position: absolute;
+            top: -25px;
+            background: var(--primary);
+            color: black;
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
+        /* P2 Specifics */
+        .p2 .cursor-ring {
+            border-color: var(--accent);
+            box-shadow: 0 0 10px var(--accent);
+        }
+
+        .p2 .cursor-ring.pinched {
+            background: var(--accent);
+        }
+
+        .p2 .cursor-label {
+            background: var(--accent);
+            color: white;
+        }
+
+
+        @keyframes pulse-mic {
+            0% {
+                opacity: 0.5;
+            }
+
+            50% {
+                opacity: 1;
+                color: var(--primary);
+            }
+
+            100% {
+                opacity: 0.5;
+            }
+        }
+
+        .loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg);
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.5s;
+        }
+
+        .loader.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Loader -->
+    <div class="loader" id="loader">
+        <h1 style="margin:0; font-size: 3rem;">AetherDraw v2</h1>
+        <p
+            style="color: var(--primary); letter-spacing: 2px; text-transform: uppercase; font-size: 0.8rem; margin-top: 1rem;">
+            Initializing AI & Voice Systems</p>
+    </div>
+
+    <!-- Voice Feedback -->
+    <div class="voice-toast" id="voice-toast">🎤 Voice Command</div>
+
+    <!-- Help Modal -->
+    <div class="modal-overlay" id="help-modal">
+        <div class="modal-content">
+            <button class="close-btn" onclick="toggleHelp()">×</button>
+            <h2 class="modal-title">AetherDraw Guide</h2>
+            <p>Welcome to the ultimate spatial canvas. Control everything with your hands or voice.</p>
+
+            <div class="command-grid">
+                <div class="cmd-item">
+                    <div class="cmd-key">Voice Commands</div>
+                    <ul style="margin: 0; padding-left: 1.2rem; font-size: 0.9rem; color: #cbd5e1;">
+                        <li>"Blue", "Red", "Green"</li>
+                        <li>"Brush", "Neon", "Ribbon"</li>
+                        <li>"Clear", "Reset"</li>
+                        <li>"Help", "Guide"</li>
+                    </ul>
+                </div>
+                <div class="cmd-item">
+                    <div class="cmd-key">Gestures</div>
+                    <ul style="margin: 0; padding-left: 1.2rem; font-size: 0.9rem; color: #cbd5e1;">
+                        <li><strong>Move:</strong> Point Index Finger</li>
+                        <li><strong>Draw:</strong> Pinch Index & Thumb</li>
+                        <li><strong>Multiplayer:</strong> Add a 2nd Hand</li>
+                    </ul>
+                </div>
+                <div class="cmd-item">
+                    <div class="cmd-key">Tools</div>
+                    <div style="font-size: 0.9rem; color: #cbd5e1;">
+                        🖌️ Standard Brush<br>
+                        ⚡ Neon Glow<br>
+                        🎗️ 3D Ribbon<br>
+                        🧼 Eraser
+                    </div>
+                </div>
+                <div class="cmd-item">
+                    <div class="cmd-key">Troubleshooting</div>
+                    <div style="font-size: 0.9rem; color: #cbd5e1;">
+                        If Voice loops permission, toggle the 🎙️ icon in the top right.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Viewport -->
+    <div class="viewport">
+        <video id="input_video"></video>
+        <canvas id="output_canvas"></canvas>
+        <canvas id="particle_canvas"></canvas>
+        <canvas id="overlay_canvas"></canvas>
+
+        <!-- Cursors -->
+        <div class="cursor-container" id="cursor-layer">
+            <!-- Injected by JS -->
+        </div>
+
+        <!-- UI -->
+        <div class="ui-layer">
+            <div class="header ui-interactive">
+                <div class="logo">AetherDraw</div>
+                <div class="status-container">
+                    <div class="status-badge mic-inactive" id="voice-status" onclick="toggleVoice()"
+                        title="Toggle Voice Control">
+                        <span class="mic-icon">🎙️</span> <span id="voice-text">Voice Off</span>
+                    </div>
+                    <div class="status-badge" onclick="toggleHelp()" title="Show Guide">
+                        ❓ Guide
+                    </div>
+                    <div class="status-badge">
+                        👥 <span id="player-count">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="toolbar ui-interactive">
+                <div class="tool-group">
+                    <span class="tool-label">Tools</span>
+                    <button class="tool-btn active" id="tool-brush" onclick="setGlobalTool('brush')">🖌️</button>
+                    <button class="tool-btn" id="tool-neon" onclick="setGlobalTool('neon')">⚡</button>
+                    <button class="tool-btn" id="tool-ribbon" onclick="setGlobalTool('ribbon')">🎗️</button>
+                    <button class="tool-btn" id="tool-eraser" onclick="setGlobalTool('eraser')">🧼</button>
+                </div>
+
+                <hr style="width: 100%; border-color: rgba(255,255,255,0.1);">
+
+                <div class="tool-group">
+                    <span class="tool-label">Colors</span>
+                    <div class="palette">
+                        <div class="color-swatch selected" style="background: #00f2ff;"
+                            onclick="setGlobalColor('#00f2ff')"></div>
+                        <div class="color-swatch" style="background: #ff0055;" onclick="setGlobalColor('#ff0055')">
+                        </div>
+                        <div class="color-swatch" style="background: #bd00ff;" onclick="setGlobalColor('#bd00ff')">
+                        </div>
+                        <div class="color-swatch" style="background: #39ff14;" onclick="setGlobalColor('#39ff14')">
+                        </div>
+                        <div class="color-swatch" style="background: #ffffff;" onclick="setGlobalColor('#ffffff')">
+                        </div>
+                    </div>
+                </div>
+
+                <hr style="width: 100%; border-color: rgba(255,255,255,0.1);">
+
+                <div class="tool-group">
+                    <button class="tool-btn" onclick="saveWork()" title="Save Image">💾</button>
+                    <button class="tool-btn" onclick="clearCanvas()" title="Clear All"
+                        style="background: rgba(255,0,0,0.2)">🗑️</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * AetherDraw v2.1 Refined
+         * Fixes: Voice toggle to prevent spam, UI layout repairs, Help Guide.
+         */
+
+        // --- Configuration ---
+        const CONFIG = {
+            smoothing: 0.15,
+            pinchThreshold: 0.05,
+            brushSize: 6,
+            eraserSize: 40
+        };
+
+        // --- State Management ---
+        class PlayerState {
+            constructor(id) {
+                this.id = id;
+                this.x = 0; this.y = 0;
+                this.smoothX = 0; this.smoothY = 0;
+                this.lastX = 0; this.lastY = 0;
+                this.isDrawing = false;
+                this.color = id === 0 ? '#00f2ff' : '#ff0055';
+                this.tool = 'brush';
+                this.element = null;
+            }
+        }
+
+        const players = [new PlayerState(0), new PlayerState(1)];
+        let isVoiceActive = false;
+        let recognition = null;
+
+        function setGlobalTool(tool) {
+            players.forEach(p => p.tool = tool);
+            document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(`tool-${tool}`).classList.add('active');
+            showVoiceToast(`Tool: ${tool.toUpperCase()}`);
+        }
+
+        function setGlobalColor(color) {
+            players[0].color = color;
+            document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
+            event?.target?.classList.add('selected');
+        }
+
+        function toggleHelp() {
+            const modal = document.getElementById('help-modal');
+            modal.classList.toggle('open');
+        }
+
+        // --- DOM ---
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const ctx = canvasElement.getContext('2d');
+        const overlayElement = document.getElementById('overlay_canvas');
+        const overlayCtx = overlayElement.getContext('2d');
+        const particleElement = document.getElementById('particle_canvas');
+        const particleCtx = particleElement.getContext('2d');
+        const cursorLayer = document.getElementById('cursor-layer');
+
+        // --- Setup Cursors ---
+        function createCursor(playerIndex) {
+            const el = document.createElement('div');
+            el.className = `hand-cursor p${playerIndex + 1}`;
+            if (playerIndex > 0) el.classList.add('p2');
+            el.innerHTML = `
+                <div class="cursor-label">P${playerIndex + 1}</div>
+                <div class="cursor-ring"></div>
+            `;
+            cursorLayer.appendChild(el);
+            return el;
+        }
+        players[0].element = createCursor(0);
+        players[1].element = createCursor(1);
+
+        // --- Resizing ---
+        function resize() {
+            [canvasElement, overlayElement, particleElement].forEach(c => {
+                c.width = window.innerWidth;
+                c.height = window.innerHeight;
+            });
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // --- Particle System ---
+        const particles = [];
+        class Particle {
+            constructor(x, y, color, type = 'sparkle') {
+                this.x = x; this.y = y;
+                this.color = color;
+                this.type = type;
+                this.life = 1.0;
+                this.vx = (Math.random() - 0.5) * 4;
+                this.vy = (Math.random() - 0.5) * 4;
+                this.size = Math.random() * 4 + 2;
+                this.decay = Math.random() * 0.03 + 0.01;
+            }
+            update() {
+                this.x += this.vx; this.y += this.vy;
+                this.life -= this.decay;
+                if (this.type === 'ribbon') this.size *= 0.95;
+            }
+            draw(ctx) {
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function updateParticles() {
+            particleCtx.clearRect(0, 0, particleElement.width, particleElement.height);
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.update();
+                p.draw(particleCtx);
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+            requestAnimationFrame(updateParticles);
+        }
+        requestAnimationFrame(updateParticles);
+
+
+
+        // --- Audio / Voice Control ---
+        function toggleVoice() {
+            const badge = document.getElementById('voice-status');
+            const text = document.getElementById('voice-text');
+
+            if (isVoiceActive) {
+                // User wants to turn OFF
+                isVoiceActive = false; // Flag off first
+                if (recognition) recognition.stop();
+                badge.classList.remove('mic-active');
+                badge.classList.add('mic-inactive');
+                text.innerText = "Voice Off";
+            } else {
+                // User wants to turn ON
+                // Ensure recognition instance exists
+                if (!recognition) initRecognition();
+
+                try {
+                    isVoiceActive = true;
+                    recognition.start();
+                    badge.classList.add('mic-active');
+                    badge.classList.remove('mic-inactive');
+                    text.innerText = "Listening";
+                } catch (e) {
+                    console.error("Start Error:", e);
+                    isVoiceActive = false;
+                    text.innerText = "Error";
+                }
+            }
+        }
+
+        function initRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                alert("Voice control not supported in this browser.");
+                return;
+            }
+
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onresult = (event) => {
+                const result = event.results[event.results.length - 1][0].transcript.trim().toLowerCase();
+                console.log("Voice Command:", result);
+
+                if (result.includes('blue')) setGlobalColor('#00f2ff');
+                else if (result.includes('red')) setGlobalColor('#ff0055');
+                else if (result.includes('green')) setGlobalColor('#39ff14');
+                else if (result.includes('white')) setGlobalColor('#ffffff');
+
+                else if (result.includes('brush')) setGlobalTool('brush');
+                else if (result.includes('eraser')) setGlobalTool('eraser');
+                else if (result.includes('neon')) setGlobalTool('neon');
+                else if (result.includes('ribbon')) setGlobalTool('ribbon');
+
+                else if (result.includes('clear') || result.includes('reset')) clearCanvas();
+                else if (result.includes('save') || result.includes('download')) saveWork();
+
+                else if (result.includes('help') || result.includes('guide')) toggleHelp();
+
+                showVoiceToast(result);
+            };
+
+            recognition.onerror = (event) => {
+                // "no-speech" isn't a fatal error, just a timeout. Ignore it.
+                if (event.error === 'no-speech') return;
+
+                console.warn("Aether Voice Warning:", event.error);
+                // CRITICAL: If permission denied, standard error, etc. -> STOP completely.
+                if (event.error === 'not-allowed' || event.error === 'service-not-allowed' || event.error === 'aborted') {
+                    isVoiceActive = false;
+                    document.getElementById('voice-status').classList.remove('mic-active');
+                    document.getElementById('voice-status').classList.add('mic-inactive');
+                    document.getElementById('voice-text').innerText = "Mic Blocked";
+                }
+            };
+
+            recognition.onend = () => {
+                // Only restart if the user INTENDED for it to be active
+                if (isVoiceActive) {
+                    setTimeout(() => {
+                        try {
+                            // double check active state after timeout
+                            if (isVoiceActive) recognition.start();
+                        } catch (e) {
+                            console.log("Restart failed", e);
+                            isVoiceActive = false;
+                        }
+                    }, 200);
+                }
+            };
+        }
+
+        function showVoiceToast(msg) {
+            const t = document.getElementById('voice-toast');
+            t.innerText = `🎤 ${msg}`;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2000);
+        }
+
+        // --- Drawing Engine ---
+        function drawStroke(player, x, y, isDrawing) {
+            player.smoothX += (x - player.smoothX) * CONFIG.smoothing;
+            player.smoothY += (y - player.smoothY) * CONFIG.smoothing;
+
+            const ring = player.element.querySelector('.cursor-ring');
+            player.element.style.left = `${player.smoothX}px`;
+            player.element.style.top = `${player.smoothY}px`;
+
+            if (isDrawing) ring.classList.add('pinched');
+            else ring.classList.remove('pinched');
+
+            if (isDrawing) {
+                ctx.beginPath();
+                ctx.moveTo(player.lastX, player.lastY);
+                ctx.lineTo(player.smoothX, player.smoothY);
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                switch (player.tool) {
+                    case 'eraser':
+                        ctx.globalCompositeOperation = 'destination-out';
+                        ctx.lineWidth = CONFIG.eraserSize;
+                        ctx.strokeStyle = 'rgba(0,0,0,1)';
+                        particles.push(new Particle(player.smoothX, player.smoothY, 'white'));
+                        break;
+
+                    case 'neon':
+                        ctx.globalCompositeOperation = 'source-over';
+                        ctx.lineWidth = CONFIG.brushSize;
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.shadowBlur = 20;
+                        ctx.shadowColor = player.color;
+                        if (Math.random() > 0.8) particles.push(new Particle(player.smoothX, player.smoothY, player.color));
+                        break;
+
+                    case 'ribbon':
+                        ctx.globalCompositeOperation = 'source-over';
+                        const speed = Math.hypot(player.smoothX - player.lastX, player.smoothY - player.lastY);
+                        ctx.lineWidth = Math.min(20, Math.max(2, speed * 2));
+                        ctx.strokeStyle = player.color;
+                        ctx.shadowBlur = 0;
+                        break;
+
+                    default:
+                        ctx.globalCompositeOperation = 'source-over';
+                        ctx.lineWidth = CONFIG.brushSize;
+                        ctx.strokeStyle = player.color;
+                        ctx.shadowBlur = 5;
+                        ctx.shadowColor = player.color;
+                }
+
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+            } else {
+                if (Math.random() > 0.9) {
+                    particles.push(new Particle(player.smoothX, player.smoothY, player.color));
+                }
+            }
+
+            player.lastX = player.smoothX;
+            player.lastY = player.smoothY;
+            player.isDrawing = isDrawing;
+        }
+
+        // --- MediaPipe Processing ---
+        function onResults(results) {
+            overlayCtx.clearRect(0, 0, overlayElement.width, overlayElement.height);
+
+            const handsFound = results.multiHandLandmarks ? results.multiHandLandmarks.length : 0;
+            document.getElementById('player-count').innerText = handsFound;
+
+            if (results.multiHandLandmarks) {
+                for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+                    if (i >= 2) break;
+
+                    const landmarks = results.multiHandLandmarks[i];
+                    const player = players[i];
+
+                    overlayCtx.save();
+                    overlayCtx.scale(-1, 1);
+                    overlayCtx.translate(-overlayElement.width, 0);
+                    drawConnectors(overlayCtx, landmarks, HAND_CONNECTIONS, { color: 'rgba(255,255,255,0.2)', lineWidth: 1 });
+                    drawLandmarks(overlayCtx, landmarks, { color: player.color, lineWidth: 0, radius: 2 });
+                    overlayCtx.restore();
+
+                    const indexTip = landmarks[8];
+                    const thumbTip = landmarks[4];
+
+                    const x = (1 - indexTip.x) * window.innerWidth;
+                    const y = indexTip.y * window.innerHeight;
+
+                    const dist = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
+                    const isPinched = dist < CONFIG.pinchThreshold;
+
+                    if (isPinched && !player.isDrawing) {
+                        player.lastX = x; player.lastY = y;
+                        player.smoothX = x; player.smoothY = y;
+                    }
+
+                    player.element.style.display = 'block';
+                    drawStroke(player, x, y, isPinched);
+                }
+
+                for (let j = handsFound; j < 2; j++) {
+                    players[j].element.style.display = 'none';
+                }
+            }
+        }
+
+        // --- Initialization ---
+        const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+        hands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        hands.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => await hands.send({ image: videoElement }),
+            width: 1280, height: 720
+        });
+
+        // --- Extras ---
+        function clearCanvas() {
+            ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            for (let i = 0; i < 100; i++) {
+                particles.push(new Particle(window.innerWidth / 2, window.innerHeight / 2, 'white'));
+            }
+        }
+
+        function saveWork() {
+            const link = document.createElement('a');
+            link.download = `aetherdraw_${Date.now()}.png`;
+            link.href = canvasElement.toDataURL();
+            link.click();
+            showVoiceToast("Image Saved");
+        }
+
+        // Start
+        camera.start().then(() => {
+            document.getElementById('loader').classList.add('hidden');
+            // Recognition is lazy-loaded on toggle
+        });
+
+    </script>
+</body>
+
+</html>
