@@ -3,7 +3,6 @@ class DomEditor extends HTMLElement {
     super();
     this.attachShadow({ mode: 'open' });
 
-    // Bind
     this._onMouseMove = this._onMouseMove.bind(this);
     this._onClick = this._onClick.bind(this);
     this._onMouseDown = this._onMouseDown.bind(this);
@@ -12,13 +11,19 @@ class DomEditor extends HTMLElement {
     this.state = {
       hoveredEl: null,
       selectedEl: null,
-
-      mode: null, // 'drag' | 'resize' | null
+      mode: null,
 
       startX: 0,
       startY: 0,
       offsetX: 0,
-      offsetY: 0
+      offsetY: 0,
+
+      grid: 10,
+      snap: true,
+      locked: new WeakSet(),
+
+      history: [],
+      future: []
     };
   }
 
@@ -26,10 +31,6 @@ class DomEditor extends HTMLElement {
     this.render();
     this.cacheDOM();
     this.attachEvents();
-  }
-
-  disconnectedCallback() {
-    this.detachEvents();
   }
 
   render() {
@@ -45,7 +46,7 @@ class DomEditor extends HTMLElement {
         .toolbar {
           position: fixed;
           background: #111;
-          color: #fff;
+          color: white;
           padding: 6px;
           border-radius: 6px;
           display: flex;
@@ -53,11 +54,26 @@ class DomEditor extends HTMLElement {
           z-index: 1000000;
         }
 
-        .toolbar button {
-          background: #333;
+        .panel {
+          position: fixed;
+          right: 0;
+          top: 0;
+          width: 260px;
+          height: 100vh;
+          background: #1e1e1e;
           color: white;
-          border: none;
-          padding: 4px 6px;
+          font-size: 12px;
+          padding: 10px;
+          z-index: 1000000;
+          overflow-y: auto;
+        }
+
+        input {
+          width: 100%;
+          margin-bottom: 6px;
+        }
+
+        button {
           cursor: pointer;
         }
 
@@ -66,18 +82,31 @@ class DomEditor extends HTMLElement {
           width: 12px;
           height: 12px;
           background: red;
-          cursor: nwse-resize;
           z-index: 1000001;
+          cursor: nwse-resize;
         }
       </style>
 
       <div id="overlay" class="overlay"></div>
       <div id="toolbar" class="toolbar" hidden>
-        <button id="edit">✏️</button>
-        <button id="dup">📦</button>
-        <button id="del">🗑</button>
+        <button id="undo">↩</button>
+        <button id="redo">↪</button>
+        <button id="lock">🔒</button>
+        <button id="snap">📐</button>
+        <button id="export">💾</button>
       </div>
+
       <div id="handle" class="handle" hidden></div>
+
+      <div id="panel" class="panel">
+        <h4>Inspector</h4>
+        <label>Width</label>
+        <input id="width" />
+        <label>Height</label>
+        <input id="height" />
+        <label>Background</label>
+        <input id="bg" />
+      </div>
     `;
   }
 
@@ -86,9 +115,17 @@ class DomEditor extends HTMLElement {
       overlay: this.shadowRoot.getElementById('overlay'),
       toolbar: this.shadowRoot.getElementById('toolbar'),
       handle: this.shadowRoot.getElementById('handle'),
-      edit: this.shadowRoot.getElementById('edit'),
-      dup: this.shadowRoot.getElementById('dup'),
-      del: this.shadowRoot.getElementById('del')
+      panel: this.shadowRoot.getElementById('panel'),
+
+      width: this.shadowRoot.getElementById('width'),
+      height: this.shadowRoot.getElementById('height'),
+      bg: this.shadowRoot.getElementById('bg'),
+
+      undo: this.shadowRoot.getElementById('undo'),
+      redo: this.shadowRoot.getElementById('redo'),
+      lock: this.shadowRoot.getElementById('lock'),
+      snap: this.shadowRoot.getElementById('snap'),
+      export: this.shadowRoot.getElementById('export')
     };
   }
 
@@ -98,44 +135,28 @@ class DomEditor extends HTMLElement {
     document.addEventListener('mousedown', this._onMouseDown);
     document.addEventListener('mouseup', this._onMouseUp);
 
-    // Toolbar actions (CRITICAL: stop propagation)
-    this.$.edit.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.enableEdit();
-    });
+    this.$.undo.onclick = () => this.undo();
+    this.$.redo.onclick = () => this.redo();
+    this.$.lock.onclick = () => this.toggleLock();
+    this.$.snap.onclick = () => this.state.snap = !this.state.snap;
+    this.$.export.onclick = () => this.exportHTML();
 
-    this.$.dup.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.duplicate();
-    });
-
-    this.$.del.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.delete();
-    });
-  }
-
-  detachEvents() {
-    document.removeEventListener('mousemove', this._onMouseMove);
-    document.removeEventListener('click', this._onClick, true);
-    document.removeEventListener('mousedown', this._onMouseDown);
-    document.removeEventListener('mouseup', this._onMouseUp);
+    this.$.width.oninput = () => this.applyStyle('width', this.$.width.value);
+    this.$.height.oninput = () => this.applyStyle('height', this.$.height.value);
+    this.$.bg.oninput = () => this.applyStyle('background', this.$.bg.value);
   }
 
   // ------------------------
-  // 🎯 SELECTION ENGINE
+  // CORE
   // ------------------------
 
   _onMouseMove(e) {
     const el = document.elementFromPoint(e.clientX, e.clientY);
-
     if (!el || this.shadowRoot.contains(el)) return;
 
     this.state.hoveredEl = el;
 
-    if (!this.state.mode) {
-      this.updateOverlay(el);
-    }
+    if (!this.state.mode) this.updateOverlay(el);
 
     if (this.state.mode === 'drag') this.drag(e);
     if (this.state.mode === 'resize') this.resize(e);
@@ -147,14 +168,8 @@ class DomEditor extends HTMLElement {
     e.preventDefault();
     e.stopPropagation();
 
-    this.state.selectedEl = this.state.hoveredEl;
-    this.updateOverlay(this.state.selectedEl);
-    this.showUI(e);
+    this.select(this.state.hoveredEl, e);
   }
-
-  // ------------------------
-  // 🖱 INTERACTION ENGINE
-  // ------------------------
 
   _onMouseDown(e) {
     if (e.target === this.$.handle) {
@@ -163,8 +178,8 @@ class DomEditor extends HTMLElement {
     }
 
     if (!this.state.selectedEl) return;
+    if (this.state.locked.has(this.state.selectedEl)) return;
 
-    // Start drag only if clicking selected element
     if (e.target === this.state.selectedEl) {
       this.state.mode = 'drag';
 
@@ -181,15 +196,34 @@ class DomEditor extends HTMLElement {
     this.state.mode = null;
   }
 
+  // ------------------------
+  // ENGINES
+  // ------------------------
+
+  select(el, e) {
+    this.state.selectedEl = el;
+    this.updateOverlay(el);
+    this.updatePanel();
+    this.showToolbar(e);
+  }
+
   drag(e) {
     const dx = e.clientX - this.state.startX;
     const dy = e.clientY - this.state.startY;
 
+    let x = this.state.offsetX + dx;
+    let y = this.state.offsetY + dy;
+
+    if (this.state.snap) {
+      x = Math.round(x / this.state.grid) * this.state.grid;
+      y = Math.round(y / this.state.grid) * this.state.grid;
+    }
+
     const el = this.state.selectedEl;
 
     el.style.position = 'absolute';
-    el.style.left = this.state.offsetX + dx + 'px';
-    el.style.top = this.state.offsetY + dy + 'px';
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
 
     this.updateOverlay(el);
   }
@@ -198,20 +232,84 @@ class DomEditor extends HTMLElement {
     const el = this.state.selectedEl;
     const rect = el.getBoundingClientRect();
 
-    const width = e.clientX - rect.left;
-    const height = e.clientY - rect.top;
+    let w = e.clientX - rect.left;
+    let h = e.clientY - rect.top;
 
-    el.style.width = Math.max(20, width) + 'px';
-    el.style.height = Math.max(20, height) + 'px';
+    if (this.state.snap) {
+      w = Math.round(w / this.state.grid) * this.state.grid;
+      h = Math.round(h / this.state.grid) * this.state.grid;
+    }
+
+    el.style.width = w + 'px';
+    el.style.height = h + 'px';
 
     this.updateOverlay(el);
   }
 
   // ------------------------
-  // 🟦 UI ENGINE
+  // PANEL
   // ------------------------
 
-  showUI(e) {
+  updatePanel() {
+    const el = this.state.selectedEl;
+    if (!el) return;
+
+    this.$.width.value = el.style.width || '';
+    this.$.height.value = el.style.height || '';
+    this.$.bg.value = el.style.background || '';
+  }
+
+  applyStyle(prop, value) {
+    this.saveHistory();
+    this.state.selectedEl.style[prop] = value;
+    this.updateOverlay(this.state.selectedEl);
+  }
+
+  // ------------------------
+  // HISTORY
+  // ------------------------
+
+  saveHistory() {
+    this.state.history.push(document.body.innerHTML);
+    this.state.future = [];
+  }
+
+  undo() {
+    if (!this.state.history.length) return;
+    this.state.future.push(document.body.innerHTML);
+    document.body.innerHTML = this.state.history.pop();
+  }
+
+  redo() {
+    if (!this.state.future.length) return;
+    this.state.history.push(document.body.innerHTML);
+    document.body.innerHTML = this.state.future.pop();
+  }
+
+  // ------------------------
+  // FEATURES
+  // ------------------------
+
+  toggleLock() {
+    const el = this.state.selectedEl;
+    if (this.state.locked.has(el)) {
+      this.state.locked.delete(el);
+    } else {
+      this.state.locked.add(el);
+    }
+  }
+
+  exportHTML() {
+    const html = document.documentElement.outerHTML;
+    console.log(html);
+    alert('HTML exported to console');
+  }
+
+  // ------------------------
+  // UI
+  // ------------------------
+
+  showToolbar(e) {
     this.$.toolbar.hidden = false;
 
     Object.assign(this.$.toolbar.style, {
@@ -236,8 +334,6 @@ class DomEditor extends HTMLElement {
   }
 
   updateHandle() {
-    if (!this.state.selectedEl) return;
-
     const rect = this.state.selectedEl.getBoundingClientRect();
 
     this.$.handle.hidden = false;
@@ -246,26 +342,6 @@ class DomEditor extends HTMLElement {
       top: rect.bottom - 6 + 'px',
       left: rect.right - 6 + 'px'
     });
-  }
-
-  // ------------------------
-  // 🧩 ACTIONS
-  // ------------------------
-
-  enableEdit() {
-    const el = this.state.selectedEl;
-    el.contentEditable = true;
-    el.focus();
-  }
-
-  delete() {
-    this.state.selectedEl?.remove();
-    this.$.toolbar.hidden = true;
-  }
-
-  duplicate() {
-    const clone = this.state.selectedEl.cloneNode(true);
-    this.state.selectedEl.after(clone);
   }
 }
 
