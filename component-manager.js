@@ -138,6 +138,35 @@ class ComponentManager extends HTMLElement {
       };
     });
   }
+
+  renderList() {
+    const list = this.shadowRoot.getElementById('list');
+    list.innerHTML = this.registry.map((comp, i) => `
+      <div class="item">
+        <strong>&lt;${comp.tag}&gt;</strong>
+        <div style="margin-top:8px">
+          <button class="btn-sm btn-exec" data-index="${i}">Execute</button>
+          <button class="btn-sm btn-del" data-del-index="${i}">Delete</button>
+        </div>
+      </div>
+    `).join('');
+
+    // Attach listeners to buttons after rendering
+    list.querySelectorAll('.btn-exec').forEach(btn => {
+      btn.onclick = () => {
+        const item = this.registry[btn.dataset.index];
+        this.executeComponent(item.tag, item.url);
+      };
+    });
+
+    list.querySelectorAll('.btn-del').forEach(btn => {
+      btn.onclick = () => {
+        this.registry.splice(btn.dataset.delIndex, 1);
+        localStorage.setItem('wc-registry', JSON.stringify(this.registry));
+        this.renderList();
+      };
+    });
+  }
 }
 
 customElements.define('component-manager', ComponentManager);
