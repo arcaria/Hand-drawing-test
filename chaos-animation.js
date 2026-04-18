@@ -1,7 +1,33 @@
 class ChaosAnimation extends HTMLElement {
+  // 1. Tell the browser which attributes to watch
+  static get observedAttributes() {
+    return ['color', 'speed'];
+  }
+
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    this.particles = [];
+    this.baseSpeed = 5;
+    this.activeColor = null;
+  }
+
+  // 2. This runs whenever you hit "Set" in your Manager
+  attributeChangedCallback(name, oldValue, newValue) {
+    if (name === 'color') {
+      this.activeColor = newValue;
+      // Update existing particles immediately
+      this.particles.forEach(p => p.color = newValue);
+    }
+    if (name === 'speed') {
+      const multiplier = parseFloat(newValue) || 1;
+      this.particles.forEach(p => {
+        // Normalize then apply new speed
+        const currentSpeed = Math.sqrt(p.dx**2 + p.dy**2);
+        p.dx = (p.dx / currentSpeed) * multiplier * 5;
+        p.dy = (p.dy / currentSpeed) * multiplier * 5;
+      });
+    }
   }
 
   connectedCallback() {
@@ -10,7 +36,7 @@ class ChaosAnimation extends HTMLElement {
         canvas {
           position: fixed; top: 0; left: 0;
           width: 100vw; height: 100vh;
-          pointer-events: none; /* Let clicks pass through to the app */
+          pointer-events: none;
           z-index: 9998;
         }
       </style>
@@ -25,18 +51,18 @@ class ChaosAnimation extends HTMLElement {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
-    const particles = Array.from({ length: 50 }, () => ({
+    this.particles = Array.from({ length: 50 }, () => ({
       x: Math.random() * canvas.width,
       y: Math.random() * canvas.height,
       r: Math.random() * 5 + 2,
       dx: (Math.random() - 0.5) * 10,
       dy: (Math.random() - 0.5) * 10,
-      color: `hsl(${Math.random() * 360}, 70%, 60%)`
+      color: this.activeColor || `hsl(${Math.random() * 360}, 70%, 60%)`
     }));
 
     const animate = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      particles.forEach(p => {
+      this.particles.forEach(p => {
         p.x += p.dx; p.y += p.dy;
         if (p.x < 0 || p.x > canvas.width) p.dx *= -1;
         if (p.y < 0 || p.y > canvas.height) p.dy *= -1;
@@ -55,4 +81,5 @@ class ChaosAnimation extends HTMLElement {
     cancelAnimationFrame(this._frame);
   }
 }
+
 customElements.define('chaos-animation', ChaosAnimation);
