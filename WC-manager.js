@@ -3,7 +3,7 @@ class ComponentManager extends HTMLElement {
     super();
     this.attachShadow({ mode: 'open' });
     this.registry = JSON.parse(localStorage.getItem('wc-registry')) || [];
-    
+
     this.shadowRoot.innerHTML = `
       <style>
         :host { --primary: #6366f1; --bg: #1e1e2e; --text: #cdd6f4; --accent: #a6e3a1; font-family: sans-serif; }
@@ -48,7 +48,7 @@ class ComponentManager extends HTMLElement {
     this.shadowRoot.querySelector('.trigger-btn').onclick = () => this.shadowRoot.querySelector('.sidebar').classList.add('open');
     this.shadowRoot.getElementById('closeBtn').onclick = () => this.shadowRoot.querySelector('.sidebar').classList.remove('open');
     this.renderList();
-    
+
     // Start the inspector loop to check for active tags every 2 seconds
     setInterval(() => this.inspectDOM(), 2000);
   }
@@ -66,19 +66,19 @@ class ComponentManager extends HTMLElement {
   // The missing link: Properly injecting the script and then the tag
   async executeComponent(tag, url) {
     if (!customElements.get(tag)) {
-        console.log(`Loading script for ${tag}...`);
-        const script = document.createElement('script');
-        script.src = url;
-        script.type = 'text/javascript';
-        document.head.appendChild(script);
-        
-        // Wait for the element to be defined in the registry
-        await customElements.whenDefined(tag);
+      console.log(`Loading script for ${tag}...`);
+      const script = document.createElement('script');
+      script.src = url;
+      script.type = 'text/javascript';
+      document.head.appendChild(script);
+
+      // Wait for the element to be defined in the registry
+      await customElements.whenDefined(tag);
     }
 
     if (!document.querySelector(tag)) {
-        const el = document.createElement(tag);
-        document.body.appendChild(el);
+      const el = document.createElement(tag);
+      document.body.appendChild(el);
     }
     this.inspectDOM();
   }
@@ -87,7 +87,7 @@ class ComponentManager extends HTMLElement {
     const inspector = this.shadowRoot.getElementById('inspector');
     // We check our registry tags to see if they exist in the actual document
     const activeTags = this.registry.filter(c => document.querySelector(c.tag));
-    
+
     inspector.innerHTML = activeTags.length ? activeTags.map(c => `
       <div class="item" style="border-left: 3px solid var(--accent)">
         <strong>&lt;${c.tag}&gt;</strong>
@@ -95,6 +95,16 @@ class ComponentManager extends HTMLElement {
         <div style="margin-top:5px">
             <button class="btn-sm" style="background:#89b4fa" onclick="document.querySelector('${c.tag}').remove()">Remove from DOM</button>
         </div>
+        // Inside your inspectDOM() map function, add this below the "Remove" button:
+        <div style="margin-top:5px; display:flex; gap:5px;">
+            <input type="text" placeholder="attr-name" class="attr-key" style="width:60px; font-size:10px; margin:0;">
+            <input type="text" placeholder="value" class="attr-val" style="width:60px; font-size:10px; margin:0;">
+            <button class="btn-sm" style="background:var(--primary)" onclick="
+                const name = this.previousElementSibling.previousElementSibling.value;
+                const val = this.previousElementSibling.value;
+        document.querySelector('${c.tag}').setAttribute(name, val);
+    ">Set</button>
+</div>
       </div>
     `).join('') : '<div style="font-size:12px; color:#6c7086">No tracked components active.</div>';
   }
@@ -113,18 +123,18 @@ class ComponentManager extends HTMLElement {
 
     // Attach listeners to buttons after rendering
     list.querySelectorAll('.btn-exec').forEach(btn => {
-        btn.onclick = () => {
-            const item = this.registry[btn.dataset.index];
-            this.executeComponent(item.tag, item.url);
-        };
+      btn.onclick = () => {
+        const item = this.registry[btn.dataset.index];
+        this.executeComponent(item.tag, item.url);
+      };
     });
 
     list.querySelectorAll('.btn-del').forEach(btn => {
-        btn.onclick = () => {
-            this.registry.splice(btn.dataset.delIndex, 1);
-            localStorage.setItem('wc-registry', JSON.stringify(this.registry));
-            this.renderList();
-        };
+      btn.onclick = () => {
+        this.registry.splice(btn.dataset.delIndex, 1);
+        localStorage.setItem('wc-registry', JSON.stringify(this.registry));
+        this.renderList();
+      };
     });
   }
 }
