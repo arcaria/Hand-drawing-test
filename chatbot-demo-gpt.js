@@ -1,4 +1,4 @@
-class ChatbotDemo extends HTMLElement {
+class ChatbotDemoGPT extends HTMLElement {
   constructor() {
     super();
 
