@@ -1,4 +1,4 @@
-class ComponentManager extends HTMLElement {
+class ComponentManager extends HTMLElement {asdasdasdasdasdas
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
