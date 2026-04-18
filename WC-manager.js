@@ -65,13 +65,10 @@ class ComponentManager extends HTMLElement {
 
   // The missing link: Properly injecting the script and then the tag
   async executeComponent(tag, url) {
-    // We add a timestamp to the URL to ensure we ALWAYS get the latest version
-    const versionedUrl = `${url}?t=${Date.now()}`;
-
     if (!customElements.get(tag)) {
       console.log(`Loading script for ${tag}...`);
       const script = document.createElement('script');
-      script.src = versionedUrl;
+      script.src = url;
       script.type = 'text/javascript';
       document.head.appendChild(script);
 
@@ -98,16 +95,6 @@ class ComponentManager extends HTMLElement {
         <div style="margin-top:5px">
             <button class="btn-sm" style="background:#89b4fa" onclick="document.querySelector('${c.tag}').remove()">Remove from DOM</button>
         </div>
-        // Inside your inspectDOM() map function, add this below the "Remove" button:
-        <div style="margin-top:5px; display:flex; gap:5px;">
-            <input type="text" placeholder="attr-name" class="attr-key" style="width:60px; font-size:10px; margin:0;">
-            <input type="text" placeholder="value" class="attr-val" style="width:60px; font-size:10px; margin:0;">
-            <button class="btn-sm" style="background:var(--primary)" onclick="
-                const name = this.previousElementSibling.previousElementSibling.value;
-                const val = this.previousElementSibling.value;
-        document.querySelector('${c.tag}').setAttribute(name, val);
-    ">Set</button>
-</div>
       </div>
     `).join('') : '<div style="font-size:12px; color:#6c7086">No tracked components active.</div>';
   }
