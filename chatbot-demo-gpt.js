@@ -211,4 +211,4 @@ class ChatbotDemo extends HTMLElement {
   }
 }
 
-customElements.define('chatbot-demo-gpt', ChatbotDemo);
+customElements.define('chatbot-demo-gpt', ChatbotDemoGPT);
