@@ -88,56 +88,55 @@ class ComponentManager extends HTMLElement {
 
   inspectDOM() {
     const inspector = this.shadowRoot.getElementById('inspector');
-    const activeComponents = this.registry.filter(c => document.querySelector(c.tag));
+    // We check our registry tags to see if they exist in the actual document
+    const activeTags = this.registry.filter(c => document.querySelector(c.tag));
 
-    // 1. Get current list of tags already showing in the inspector
-    const existingTags = Array.from(inspector.querySelectorAll('.item')).map(el => el.dataset.tag);
-    const activeTagNames = activeComponents.map(c => c.tag);
-
-    // 2. Only rebuild if the list of active components actually changed
-    // This prevents wiping out your textboxes while you're typing!
-    if (JSON.stringify(existingTags) !== JSON.stringify(activeTagNames)) {
-      this.renderInspector(activeComponents);
-    }
-  }
-
-  renderInspector(activeComponents) {
-    const inspector = this.shadowRoot.getElementById('inspector');
-    if (activeComponents.length === 0) {
-      inspector.innerHTML = '<div style="font-size:12px; color:#6c7086">No tracked components active.</div>';
-      return;
-    }
-
-    inspector.innerHTML = activeComponents.map(c => `
-      <div class="item" data-tag="${c.tag}" style="border-left: 3px solid var(--accent)">
+    inspector.innerHTML = activeTags.length ? activeTags.map(c => `
+      <div class="item" style="border-left: 3px solid var(--accent)">
         <strong>&lt;${c.tag}&gt;</strong>
         <span class="status-badge">ACTIVE</span>
-        
-        <div style="margin-top:10px; display:flex; flex-direction:column; gap:5px;">
-            <div style="display:flex; gap:2px;">
-                <input type="text" placeholder="attr" class="attr-key" style="flex:1; font-size:10px; margin:0;">
-                <input type="text" placeholder="val" class="attr-val" style="flex:1; font-size:10px; margin:0;">
-                <button class="btn-sm btn-set" style="background:var(--primary); color:white;">Set</button>
-            </div>
-            <button class="btn-sm btn-remove" style="background:#89b4fa; width:100%;">Remove from DOM</button>
+        <div style="margin-top:5px">
+            <button class="btn-sm" style="background:#89b4fa" onclick="document.querySelector('${c.tag}').remove()">Remove from DOM</button>
+        </div>
+        // Inside your inspectDOM() map function, add this below the "Remove" button:
+        <div style="margin-top:5px; display:flex; gap:5px;">
+            <input type="text" placeholder="attr-name" class="attr-key" style="width:60px; font-size:10px; margin:0;">
+            <input type="text" placeholder="value" class="attr-val" style="width:60px; font-size:10px; margin:0;">
+            <button class="btn-sm" style="background:var(--primary)" onclick="
+                const name = this.previousElementSibling.previousElementSibling.value;
+                const val = this.previousElementSibling.value;
+        document.querySelector('${c.tag}').setAttribute(name, val);
+    ">Set</button>
+</div>
+      </div>
+    `).join('') : '<div style="font-size:12px; color:#6c7086">No tracked components active.</div>';
+  }
+
+  renderList() {
+    const list = this.shadowRoot.getElementById('list');
+    list.innerHTML = this.registry.map((comp, i) => `
+      <div class="item">
+        <strong>&lt;${comp.tag}&gt;</strong>
+        <div style="margin-top:8px">
+          <button class="btn-sm btn-exec" data-index="${i}">Execute</button>
+          <button class="btn-sm btn-del" data-del-index="${i}">Delete</button>
         </div>
       </div>
     `).join('');
 
-    // Attach listeners manually to avoid string-based 'onclick' issues
-    inspector.querySelectorAll('.item').forEach(itemEl => {
-      const tag = itemEl.dataset.tag;
-      const targetEl = document.querySelector(tag);
-
-      itemEl.querySelector('.btn-set').onclick = () => {
-        const key = itemEl.querySelector('.attr-key').value;
-        const val = itemEl.querySelector('.attr-val').value;
-        if (key) targetEl.setAttribute(key, val);
+    // Attach listeners to buttons after rendering
+    list.querySelectorAll('.btn-exec').forEach(btn => {
+      btn.onclick = () => {
+        const item = this.registry[btn.dataset.index];
+        this.executeComponent(item.tag, item.url);
       };
+    });
 
-      itemEl.querySelector('.btn-remove').onclick = () => {
-        targetEl.remove();
-        this.inspectDOM(); // Immediate refresh
+    list.querySelectorAll('.btn-del').forEach(btn => {
+      btn.onclick = () => {
+        this.registry.splice(btn.dataset.delIndex, 1);
+        localStorage.setItem('wc-registry', JSON.stringify(this.registry));
+        this.renderList();
       };
     });
   }
