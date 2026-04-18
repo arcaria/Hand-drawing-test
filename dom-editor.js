@@ -3,7 +3,7 @@ class DomEditor extends HTMLElement {
     super();
     this.attachShadow({ mode: 'open' });
 
-    // Bind handlers
+    // Bind
     this._onMouseMove = this._onMouseMove.bind(this);
     this._onClick = this._onClick.bind(this);
     this._onMouseDown = this._onMouseDown.bind(this);
@@ -12,9 +12,13 @@ class DomEditor extends HTMLElement {
     this.state = {
       hoveredEl: null,
       selectedEl: null,
-      dragging: false,
-      resizing: false,
-      resizeDir: null
+
+      mode: null, // 'drag' | 'resize' | null
+
+      startX: 0,
+      startY: 0,
+      offsetX: 0,
+      offsetY: 0
     };
   }
 
@@ -42,39 +46,37 @@ class DomEditor extends HTMLElement {
           position: fixed;
           background: #111;
           color: #fff;
-          padding: 6px 10px;
-          font-size: 12px;
+          padding: 6px;
           border-radius: 6px;
-          z-index: 1000000;
           display: flex;
-          gap: 8px;
+          gap: 5px;
+          z-index: 1000000;
         }
 
         .toolbar button {
           background: #333;
           color: white;
           border: none;
-          padding: 4px 8px;
+          padding: 4px 6px;
           cursor: pointer;
         }
 
         .handle {
           position: fixed;
-          width: 10px;
-          height: 10px;
+          width: 12px;
+          height: 12px;
           background: red;
-          z-index: 1000001;
           cursor: nwse-resize;
+          z-index: 1000001;
         }
       </style>
 
       <div id="overlay" class="overlay"></div>
       <div id="toolbar" class="toolbar" hidden>
-        <button id="editBtn">✏️</button>
-        <button id="dupBtn">📦</button>
-        <button id="delBtn">🗑</button>
+        <button id="edit">✏️</button>
+        <button id="dup">📦</button>
+        <button id="del">🗑</button>
       </div>
-
       <div id="handle" class="handle" hidden></div>
     `;
   }
@@ -84,9 +86,9 @@ class DomEditor extends HTMLElement {
       overlay: this.shadowRoot.getElementById('overlay'),
       toolbar: this.shadowRoot.getElementById('toolbar'),
       handle: this.shadowRoot.getElementById('handle'),
-      editBtn: this.shadowRoot.getElementById('editBtn'),
-      dupBtn: this.shadowRoot.getElementById('dupBtn'),
-      delBtn: this.shadowRoot.getElementById('delBtn')
+      edit: this.shadowRoot.getElementById('edit'),
+      dup: this.shadowRoot.getElementById('dup'),
+      del: this.shadowRoot.getElementById('del')
     };
   }
 
@@ -96,9 +98,21 @@ class DomEditor extends HTMLElement {
     document.addEventListener('mousedown', this._onMouseDown);
     document.addEventListener('mouseup', this._onMouseUp);
 
-    this.$.editBtn.addEventListener('click', () => this.enableEdit());
-    this.$.dupBtn.addEventListener('click', () => this.duplicate());
-    this.$.delBtn.addEventListener('click', () => this.delete());
+    // Toolbar actions (CRITICAL: stop propagation)
+    this.$.edit.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.enableEdit();
+    });
+
+    this.$.dup.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.duplicate();
+    });
+
+    this.$.del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.delete();
+    });
   }
 
   detachEvents() {
@@ -109,27 +123,22 @@ class DomEditor extends HTMLElement {
   }
 
   // ------------------------
-  // 🎯 CORE
+  // 🎯 SELECTION ENGINE
   // ------------------------
 
   _onMouseMove(e) {
     const el = document.elementFromPoint(e.clientX, e.clientY);
 
-    if (!el || el === this || this.shadowRoot.contains(el)) return;
+    if (!el || this.shadowRoot.contains(el)) return;
 
     this.state.hoveredEl = el;
 
-    if (!this.state.dragging && !this.state.resizing) {
+    if (!this.state.mode) {
       this.updateOverlay(el);
     }
 
-    if (this.state.dragging) {
-      this.drag(e);
-    }
-
-    if (this.state.resizing) {
-      this.resize(e);
-    }
+    if (this.state.mode === 'drag') this.drag(e);
+    if (this.state.mode === 'resize') this.resize(e);
   }
 
   _onClick(e) {
@@ -140,85 +149,47 @@ class DomEditor extends HTMLElement {
 
     this.state.selectedEl = this.state.hoveredEl;
     this.updateOverlay(this.state.selectedEl);
-    this.showToolbar(e.clientX, e.clientY);
-    this.showHandle();
+    this.showUI(e);
   }
+
+  // ------------------------
+  // 🖱 INTERACTION ENGINE
+  // ------------------------
 
   _onMouseDown(e) {
     if (e.target === this.$.handle) {
-      this.state.resizing = true;
+      this.state.mode = 'resize';
       return;
     }
 
     if (!this.state.selectedEl) return;
 
-    this.state.dragging = true;
+    // Start drag only if clicking selected element
+    if (e.target === this.state.selectedEl) {
+      this.state.mode = 'drag';
 
-    const rect = this.state.selectedEl.getBoundingClientRect();
-    this.startX = e.clientX;
-    this.startY = e.clientY;
+      const rect = this.state.selectedEl.getBoundingClientRect();
 
-    this.offsetX = rect.left;
-    this.offsetY = rect.top;
+      this.state.startX = e.clientX;
+      this.state.startY = e.clientY;
+      this.state.offsetX = rect.left;
+      this.state.offsetY = rect.top;
+    }
   }
 
   _onMouseUp() {
-    this.state.dragging = false;
-    this.state.resizing = false;
+    this.state.mode = null;
   }
-
-  // ------------------------
-  // 🟦 VISUALS
-  // ------------------------
-
-  updateOverlay(el) {
-    const rect = el.getBoundingClientRect();
-
-    Object.assign(this.$.overlay.style, {
-      top: rect.top + 'px',
-      left: rect.left + 'px',
-      width: rect.width + 'px',
-      height: rect.height + 'px'
-    });
-
-    this.updateHandle(rect);
-  }
-
-  showToolbar(x, y) {
-    this.$.toolbar.hidden = false;
-
-    Object.assign(this.$.toolbar.style, {
-      top: y + 10 + 'px',
-      left: x + 10 + 'px'
-    });
-  }
-
-  updateHandle(rect) {
-    this.$.handle.hidden = false;
-
-    Object.assign(this.$.handle.style, {
-      top: rect.bottom - 5 + 'px',
-      left: rect.right - 5 + 'px'
-    });
-  }
-
-  showHandle() {
-    this.$.handle.hidden = false;
-  }
-
-  // ------------------------
-  // 🖱 INTERACTIONS
-  // ------------------------
 
   drag(e) {
-    const dx = e.clientX - this.startX;
-    const dy = e.clientY - this.startY;
+    const dx = e.clientX - this.state.startX;
+    const dy = e.clientY - this.state.startY;
 
     const el = this.state.selectedEl;
 
     el.style.position = 'absolute';
-    el.style.left = this.offsetX + dx + 'px';
-    el.style.top = this.offsetY + dy + 'px';
+    el.style.left = this.state.offsetX + dx + 'px';
+    el.style.top = this.state.offsetY + dy + 'px';
 
     this.updateOverlay(el);
   }
@@ -230,10 +201,51 @@ class DomEditor extends HTMLElement {
     const width = e.clientX - rect.left;
     const height = e.clientY - rect.top;
 
-    el.style.width = width + 'px';
-    el.style.height = height + 'px';
+    el.style.width = Math.max(20, width) + 'px';
+    el.style.height = Math.max(20, height) + 'px';
 
     this.updateOverlay(el);
+  }
+
+  // ------------------------
+  // 🟦 UI ENGINE
+  // ------------------------
+
+  showUI(e) {
+    this.$.toolbar.hidden = false;
+
+    Object.assign(this.$.toolbar.style, {
+      top: e.clientY + 10 + 'px',
+      left: e.clientX + 10 + 'px'
+    });
+
+    this.updateHandle();
+  }
+
+  updateOverlay(el) {
+    const rect = el.getBoundingClientRect();
+
+    Object.assign(this.$.overlay.style, {
+      top: rect.top + 'px',
+      left: rect.left + 'px',
+      width: rect.width + 'px',
+      height: rect.height + 'px'
+    });
+
+    this.updateHandle();
+  }
+
+  updateHandle() {
+    if (!this.state.selectedEl) return;
+
+    const rect = this.state.selectedEl.getBoundingClientRect();
+
+    this.$.handle.hidden = false;
+
+    Object.assign(this.$.handle.style, {
+      top: rect.bottom - 6 + 'px',
+      left: rect.right - 6 + 'px'
+    });
   }
 
   // ------------------------
@@ -249,7 +261,6 @@ class DomEditor extends HTMLElement {
   delete() {
     this.state.selectedEl?.remove();
     this.$.toolbar.hidden = true;
-    this.$.overlay.style.width = '0';
   }
 
   duplicate() {
